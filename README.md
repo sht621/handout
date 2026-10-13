@@ -25,7 +25,7 @@
 
 - Ubuntu 24.04 / ROS 2 Jazzy
 - CPU
-- Whisper tiny（多言語版）
+- Whisper（多言語版）
 - PC内蔵マイク
 
 ---
@@ -79,7 +79,7 @@ rosdep update
 
 | 設定項目 | 変更後 | 説明 |
 | --- | --- | --- |
-| `model.filename` | `"ggml-tiny.bin"` | 軽量な多言語モデルを使用 |
+| `model.filename` | `"ggml-small.bin"` | 多言語モデルを使用 |
 | `transcription.language` | `"ja"` | 日本語を指定 |
 | `gpu.enabled` | `false` | CPUで推論 |
 
@@ -175,6 +175,11 @@ ros2 action send_goal /whisper/listen whisper_msgs/action/STT "{}"
 `~/自分のワークスペース名/src/mytest/mytest/`
 
 このフォルダ内に、`speech_client.py`というファイルを新規作成してください。
+
+```bash
+cd ~/自分のワークスペース名
+touch src/mytest/mytest/speech_client.py
+```
 
 ※「自分のワークスペース名」は、各自のワークスペース名に読み替えてください。
 

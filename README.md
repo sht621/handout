@@ -1,4 +1,4 @@
-**音声認識（ROS 2 + Whisper）**
+# **音声認識（ROS 2 + Whisper）**
 
 ## 1. 概要
 

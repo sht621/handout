@@ -1,0 +1,384 @@
+# **音声認識（ROS 2 + Whisper）**
+
+## 1. 概要
+
+音声認識（Speech-to-Text：STT）は、入力された音声を解析し、発話内容をテキストに変換する技術です。
+今回は、ROS 2に対応した音声認識パッケージ `whisper_ros` を使用し、PCの内蔵マイクから日本語の音声認識を行います。
+
+### 使用する技術
+
+| 技術 | 役割 |
+| --- | --- |
+| Whisper tiny | 音声をテキストに変換するAIモデル |
+| Silero VAD | 発話している区間を検出する |
+| audio_common | マイクから音声データを取得する |
+| ROS 2 Action | 音声認識を要求し、結果を受け取る |
+
+**実習目標**
+
+- ROS 2に音声認識パッケージを導入する
+- 内蔵マイクから日本語音声を認識する
+- ROS 2 Actionで認識結果を取得する
+- 音声認識結果をTopicにPublishする
+
+**使用環境**
+
+- Ubuntu 24.04 / ROS 2 Jazzy
+- CPU
+- Whisper tiny（多言語版）
+- PC内蔵マイク
+
+---
+
+## 2. 環境構築
+
+**注意：コマンド内の「自分のワークスペース名」は、各自のROS 2ワークスペース名に書き換えて実行してください。**
+
+### ① パッケージの取得
+
+```
+source /opt/ros/jazzy/setup.bash
+cd ~/自分のワークスペース名/src
+git clone https://github.com/mgonzs13/whisper_ros.git
+cd ..
+vcs import src < src/whisper_ros/dependencies.repos
+```
+
+GitHubから `whisper_ros` と、関連するパッケージを取得します。
+
+- `git clone`：リポジトリを取得する
+- `vcs import`：依存するリポジトリを一括取得する
+
+### ② 依存関係のインストール
+
+```
+rosdep update
+rosdep install --from-paths src/whisper_ros src/audio_common --ignore-src -r -y
+```
+
+必要なライブラリやシステムパッケージをインストールします。
+
+**※ rosdepが未初期化の場合**
+
+初期化に関するエラーが出た場合は、以下を実行してください。
+
+```
+sudo rosdep init
+rosdep update
+```
+
+その後、②のインストールコマンドを再実行してください。
+
+### ③ Whisperの設定
+
+以下のファイルを開きます。
+
+`自分のワークスペース名/src/whisper_ros/whisper_bringup/config/whisper.yaml`
+
+`whisper.yaml` をテキストエディタで開き、次の3項目を変更してください。
+
+| 設定項目 | 変更後 | 説明 |
+| --- | --- | --- |
+| `model.filename` | `"ggml-tiny.bin"` | 軽量な多言語モデルを使用 |
+| `transcription.language` | `"ja"` | 日本語を指定 |
+| `gpu.enabled` | `false` | CPUで推論 |
+
+その他の設定は変更せず、ファイルを上書き保存してください。
+
+### ④ ビルド
+
+```
+cd ~/自分のワークスペース名
+colcon build 
+source install/setup.bash
+```
+
+必要なROS 2パッケージをビルドします。
+
+---
+
+## 3. 音声認識の実行
+
+### ① 音声認識ノードの起動
+
+ターミナル1で実行します。
+
+```
+cd ~/自分のワークスペース名
+source install/setup.bash
+ros2 launch whisper_bringup whisper.launch.py
+```
+
+音声認識用のノードを起動します。
+
+※ 初回はモデルのダウンロードが発生する場合があります。
+
+### ② デモクライアントで音声認識
+
+新しくターミナル2を開きます。
+
+```
+cd ~/自分のワークスペース名
+source install/setup.bash
+ros2 run whisper_demos whisper_demo_node
+```
+
+内蔵マイクに向かって話しかけ、認識結果を確認してください。
+
+---
+
+## 4. ROS 2 Actionによる音声認識
+
+次に、ROS 2のActionを直接呼び出します。
+
+デモクライアントを `Ctrl + C` で終了し、ターミナル2で以下を実行してください。
+
+```
+ros2 action send_goal /whisper/listen whisper_msgs/action/STT "{}"
+```
+
+マイクに向かって発話し、認識結果を確認してください。
+
+> 
+> 
+> 
+> ### ROS 2の通信方式
+> 
+> ROS 2には、主にTopic、Service、Actionの3種類の通信方式があります。
+> 
+> | 通信方式 | 特徴 | 使用例 |
+> | --- | --- | --- |
+> | Topic | データを継続的に配信・受信する | センサデータの配信 |
+> | Service | 処理を要求し、その結果を受け取る | 設定の変更 |
+> | Action | 時間のかかる処理を要求し、完了を待たずに途中経過の受信やキャンセルもできる | ナビゲーション・音声認識 |
+> 
+> 今回使用する`whisper_ros`では、**Actionを利用して音声認識を要求し、認識結果を取得します。**
+> 
+
+---
+
+## 5. 音声認識結果のTopic配信
+
+`whisper_ros`のActionを使用して取得した音声認識結果を、ROS 2のTopicに配信します。
+
+今回は、Actionクライアントのプログラムをコピーして作成し、Publisherに関する処理を追加します。
+
+**実習内容**
+
+1. 既存の`mytest`パッケージにPythonノードを追加する
+2. Publisherを作成する
+3. 音声認識結果を`/recognized_text`にPublishする
+4. `ros2 topic echo`で結果を確認する
+
+### 5.2 Pythonファイルの作成
+
+`~/自分のワークスペース名/src/mytest/mytest/`
+
+このフォルダ内に、`speech_client.py`というファイルを新規作成してください。
+
+※「自分のワークスペース名」は、各自のワークスペース名に読み替えてください。
+
+フォルダ構成は以下のようになります。
+
+```
+自分のワークスペース名/
+└── src/
+    ├── whisper_ros/
+    └── mytest/
+        ├── mytest/
+        │   ├── __init__.py
+        │   └── speech_client.py  ← 新規作成
+        ├── package.xml
+        └── setup.py
+```
+
+### 5.3 プログラムの記述
+
+作成した`speech_client.py`をテキストエディタで開き、以下のコードをコピー＆ペーストしてください。
+
+```python
+import rclpy
+from rclpy.node import Node
+from rclpy.action import ActionClient
+from std_msgs.msg import String
+from whisper_msgs.action import STT
+
+class SpeechClient(Node):
+    def __init__(self):
+        super().__init__('speech_client')
+
+        # 音声認識用Actionクライアント
+        self.action_client = ActionClient(
+            self, STT, '/whisper/listen'
+        )
+
+        # TODO ① Publisherを作成する
+
+    def recognize(self):
+        # Actionサーバーへの接続
+        self.get_logger().info('音声認識サーバーに接続中...')
+        self.action_client.wait_for_server()
+
+        # 音声認識を要求
+        goal = STT.Goal()
+        future = self.action_client.send_goal_async(goal)
+        rclpy.spin_until_future_complete(self, future)
+
+        goal_handle = future.result()
+        if goal_handle is None or not goal_handle.accepted:
+            self.get_logger().error('音声認識の要求に失敗しました')
+            return False
+
+        self.get_logger().info('マイクに向かって話してください')
+
+        # 認識結果を取得
+        future = goal_handle.get_result_async()
+        rclpy.spin_until_future_complete(self, future)
+
+        response = future.result()
+        if response is None:
+            self.get_logger().error('音声認識結果を取得できませんでした')
+            return False
+
+        recognized_text = response.result.transcription.text
+
+        self.get_logger().info(
+            f'認識結果: {recognized_text}'
+        )
+
+        # Publishするメッセージを作成
+        msg = String()
+        msg.data = recognized_text
+
+        # TODO ② 認識結果をPublishする
+
+        return True
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = SpeechClient()
+
+    try:
+        # 音声認識を繰り返す
+        while rclpy.ok():
+            if not node.recognize():
+                break
+
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+```
+
+このコードでは、Actionを使った音声認識の要求と、認識結果の取得まで実装されています。
+
+### 5.4 Publisherの実装
+
+プログラム内の`TODO`となっている2か所を実装してください。
+
+**TODO ① Publisherの作成**
+
+`__init__`内に、以下の条件を満たすPublisherを作成してください。
+
+| 項目 | 指定内容 |
+| --- | --- |
+| メッセージ型 | `String` |
+| Topic名 | `/recognized_text` |
+| QoS depth | `10` |
+
+ヒント：`self.create_publisher()`を使用します。
+
+**TODO ② 認識結果のPublish**
+
+`msg`には、すでに音声認識結果が格納されています。
+
+TODO ①で作成したPublisherを使用して、`msg`をPublishしてください。
+
+ヒント：`publish()`を使用します。
+
+### 5.5 setup.pyの編集
+
+`mytest`パッケージ内の`setup.py`を開きます。
+
+`entry_points`の`console_scripts`に、以下の1行を追加してください。
+
+```python
+'speech_client = mytest.speech_client:main',
+```
+
+編集例：
+
+```python
+entry_points={
+    'console_scripts': [
+        # 既存の設定は削除しない
+        'speech_client = mytest.speech_client:main',
+    ],
+},
+```
+
+これにより、`ros2 run mytest speech_client`でプログラムを実行できるようになります。
+
+続いて、`package.xml`に以下の依存関係が記述されているか確認し、不足しているものを追加してください。既にある場合は重複して追加しないでください。
+
+```xml
+<exec_depend>rclpy</exec_depend>
+<exec_depend>std_msgs</exec_depend>
+<exec_depend>whisper_msgs</exec_depend>
+```
+
+### 5.6 ビルド
+
+ワークスペースへ移動し、`mytest`をビルドします。
+
+```bash
+cd ~/自分のワークスペース名
+colcon build --packages-select mytest
+source install/setup.bash
+```
+
+プログラムを修正した場合は、再度ビルドしてください。
+
+### 5.7 実行と動作確認
+
+3つのターミナルを使用します。
+
+**ターミナル①：Whisperの起動**
+
+```bash
+cd ~/自分のワークスペース名
+source install/setup.bash
+ros2 launch whisper_bringup whisper.launch.py
+```
+
+**ターミナル②：Topicの確認**
+
+```bash
+cd ~/自分のワークスペース名
+source install/setup.bash
+ros2 topic echo /recognized_text
+```
+
+**ターミナル③：Actionクライアントの実行**
+
+```bash
+cd ~/自分のワークスペース名
+source install/setup.bash
+ros2 run mytest speech_client
+```
+
+ターミナル③で音声認識が開始されたら、マイクに向かって話してください。
+
+音声認識が成功すると、ターミナル③に認識結果が表示されます。
+
+さらに、ターミナル②に以下のようなメッセージが表示されれば、Topicへの配信も成功しています。
+
+```yaml
+data: こんにちは
+---
+```
